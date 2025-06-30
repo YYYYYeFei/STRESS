@@ -1,6 +1,6 @@
-#STRESS: Spatial Transcriptome Resolution Enhancing Method based on the State Space Model
+# STRESS: Spatial Transcriptome Resolution Enhancing Method based on the State Space Model
 ___
-##Overview
+## Overview
 
 The widespread application of spatial resolved transcriptomics (SRT) has provided a wealth of data for characterizing gene expression patterns within the spatial microenvironments of various tissues. However, the inherent resolution limitations of SRT in most published data restrict deeper biological insights. To overcome this resolution limitation, we propose STRESS, the first deep learning method designed specifically for resolution enhancement tasks using only SRT data. By constructing a 3D structure that integrates spatial location information and gene expression levels, STRESS identifies interaction relationships between different locations and genes, predicts the gene expression profiles in the gaps surrounding each spot, and achieves resolution enhancement based on these predictions. STRESS has been trained and tested on datasets from multiple platforms and tissue types, and its utility in downstream analyses has been validated using independent datasets. We demonstrate that this resolution enhancement facilitates the identification and delineation of spatial domains. STRESS holds significant potential for advancing data mining in spatial transcriptomics.
 
