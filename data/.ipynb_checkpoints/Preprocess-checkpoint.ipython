@@ -1,0 +1,296 @@
+# Step 1: Convert raw .h5 files into h5ad with label and spatial info
+# Step 2: Convert h5ad to HR / LR / DROP numpy matrices
+# Step 3: Convert model outputs back to h5ad format
+# Author: Xiuyuan Wang
+# Date: 2025-06
+
+import os
+import sys
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import warnings
+from pathlib import Path
+from sklearn.mixture import GaussianMixture
+
+warnings.filterwarnings('ignore', category=FutureWarning, module='numba')
+warnings.filterwarnings("ignore", message="Variable names are not unique")
+warnings.filterwarnings("ignore", message="Setting element .* of view", category=UserWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="umap")
+warnings.filterwarnings("ignore", message="Variable names are not unique")
+
+# ==============================
+# Constants
+# ==============================
+GENE_COUNT = 2048
+MATRIX_SIZE = 128
+TARGET_CLUSTERS = 7
+
+# ==============================
+# Step 1: Convert RAW files to h5ad
+# ==============================
+def convert_raw_to_h5ad(raw_dir: Path, output_dir: Path):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    h5_files = sorted(raw_dir.glob("*.h5"))
+    label_files = sorted(raw_dir.glob("*.csv"))
+    pos_files = sorted(raw_dir.glob("*.txt"))
+
+    for h5_file, label_file, pos_file in zip(h5_files, label_files, pos_files):
+        sample_id = h5_file.name.split('_')[0]
+
+        adata = sc.read_10x_h5(h5_file)
+        adata.var_names_make_unique()
+
+        labels = pd.read_csv(label_file)
+        labels["barcode"] = labels["key"].str.split("_").str[1]
+        labels.set_index("barcode", inplace=True)
+        adata.obs["ground_truth"] = adata.obs_names.map(labels["ground_truth"])
+
+        position_df = pd.read_csv(
+            pos_file,
+            header=None,
+            names=["barcode", "in_tissue", "array_row", "array_col", "pixel_row", "pixel_col"]
+        )
+        position_df.set_index("barcode", inplace=True)
+        for col in position_df.columns:
+            adata.obs[col] = adata.obs_names.map(position_df[col])
+
+        out_path = output_dir / f"{sample_id}_with_label_and_position.h5ad"
+        adata.write(out_path)
+        print(f"[Step 1] Saved: {out_path}")
+
+
+# ==============================
+# Step 2: Convert h5ad to .npy matrices
+# ==============================
+def downsample_matrix_odd_1(matrix):
+    downsampled = matrix[::2, ::2, :].copy()
+    downsampled[::2, ::2, :] = 0
+    downsampled[1::2, 1::2, :] = 0
+    return downsampled
+
+def downsample_matrix_odd_2(matrix):
+    downsampled = matrix[::2, ::2, :].copy()
+    downsampled[1::2, ::2, :] = 0
+    downsampled[::2, 1::2, :] = 0
+    return downsampled
+
+def downsample_matrix_even_1(matrix):
+    downsampled = matrix[1::2, 1::2, :].copy()
+    downsampled[::2, ::2, :] = 0
+    downsampled[1::2, 1::2, :] = 0
+    return downsampled
+
+def downsample_matrix_even_2(matrix):
+    downsampled = matrix[1::2, 1::2, :].copy()
+    downsampled[1::2, ::2, :] = 0
+    downsampled[::2, 1::2, :] = 0
+    return downsampled
+
+def convert_h5ad_to_npy(sample_file: Path, output_dir: Path):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    adata = sc.read_h5ad(sample_file)
+    sample_id = sample_file.name.split('_')[0]
+    adata = adata[:, ~adata.var_names.duplicated()].copy()
+
+    sc.pp.filter_genes(adata, min_counts=3)
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+    sc.pp.highly_variable_genes(adata)
+
+    hvg_genes = adata.var[adata.var['highly_variable']].sort_values(
+        by='dispersions_norm', ascending=False
+    ).index[:GENE_COUNT]
+    adata = adata[:, hvg_genes]
+
+    X = adata.X.toarray()
+    HR = np.zeros((MATRIX_SIZE, MATRIX_SIZE, GENE_COUNT))
+    rows = adata.obs['array_row'].astype(int).values
+    cols = adata.obs['array_col'].astype(int).values
+    for i in range(len(rows)):
+        HR[rows[i], cols[i], :] = X[i, :]
+
+    np.save(output_dir / f"{sample_id}_HR.npy", HR)
+    np.save(output_dir / f"{sample_id}_LR_even_1.npy", downsample_matrix_even_1(HR))
+    np.save(output_dir / f"{sample_id}_LR_even_2.npy", downsample_matrix_even_2(HR))
+    np.save(output_dir / f"{sample_id}_LR_odd_1.npy", downsample_matrix_odd_1(HR))
+    np.save(output_dir / f"{sample_id}_LR_odd_2.npy", downsample_matrix_odd_2(HR))
+
+    print(f"[Step 2] Saved HR/LR for: {sample_id}")
+
+
+# ==============================
+# Step 3: Convert npy model outputs back to h5ad
+# ==============================
+def tune_resolution(adata, target_clusters, method="leiden", max_iter=20):
+    if method == "mclust":
+        X = adata.obsm["X_pca"][:, :50]
+        gmm = GaussianMixture(n_components=target_clusters, random_state=0)
+        adata.obs["mclust"] = gmm.fit_predict(X).astype(str)
+        return adata, None
+
+    lower, upper = 0.01, 3.0
+    for _ in range(max_iter):
+        res = (lower + upper) / 2
+        if method == "leiden":
+            sc.tl.leiden(adata, resolution=res)
+        else:
+            sc.tl.louvain(adata, resolution=res)
+        n_clusters = adata.obs[method].nunique()
+        if n_clusters == target_clusters:
+            break
+        elif n_clusters < target_clusters:
+            lower = res
+        else:
+            upper = res
+    return adata, res
+
+def add_ground_truth_label(adata_label, adata_new):
+    adata_label.obs['coord'] = list(zip(adata_label.obs['array_row'], adata_label.obs['array_col']))
+    adata_new.obs['coord'] = list(zip(adata_new.obs['array_row'], adata_new.obs['array_col']))
+    coord_to_ground_truth = pd.Series(
+        data=adata_label.obs['ground_truth'].values, 
+        index=adata_label.obs['coord']
+    ).to_dict()
+    adata_new.obs['ground_truth'] = [
+        coord_to_ground_truth.get(coord, np.nan)  
+        for coord in adata_new.obs['coord']
+    ]
+    n_genes_new = adata_new.shape[1]
+    genes_to_copy = adata_label.var.index[:n_genes_new]
+    adata_new.var.index = genes_to_copy
+    del adata_label.obs['coord']
+    del adata_new.obs['coord']
+    
+    return adata_new
+
+def refine_points(adata):
+    x, y = adata.obs['array_col'], adata.obs['array_row']
+    new_x, new_y = np.copy(x), np.copy(y)
+    for i, (x_i, y_i) in enumerate(zip(x, y)):
+        if (x_i % 4 == 1) and (y_i % 4 == 0):  # (4k+2, 4m+2)
+            new_x[i] += 1 
+        elif (x_i % 4 == 0) and (y_i % 4 == 1):  # (4k+1, 4m+3)
+            new_x[i] -= 1  
+        elif (x_i % 4 == 3) and (y_i % 4 == 2):  # (4k+3, 4m+1)
+            new_x[i] += 1 
+        elif (x_i % 4 == 2) and (y_i % 4 == 3):  # (4k+4, 4m)
+            new_x[i] -= 1 
+    
+    adata.obsm["spatial"] = np.column_stack([new_x, new_y])
+    adata.obs['array_col'] = new_x
+    adata.obs['array_row'] = new_y
+
+def from_npy_to_adata_all_groups(sample_id, input_pathdir, output_pathdir, matched_dir):
+
+    adata = sc.read_h5ad(matched_dir / f"{sample_id}_with_label_and_position.h5ad")
+
+    lr_data = np.load(input_pathdir / f"{sample_id}_LR.npy")
+    gt_data = np.load(input_pathdir / f"{sample_id}_GT.npy")
+    pred_data = np.load(input_pathdir / f"{sample_id}_res.npy")
+
+    input_data = lr_data[0, 0]
+    ground_truth_data = gt_data[0, 0]  
+    predicted_data = pred_data[0]
+    
+
+    H, W = predicted_data.shape[1], predicted_data.shape[2]
+    row_idx = np.arange(H).reshape(-1, 1)
+    col_idx = np.arange(W).reshape(1, -1)
+    block_mask = ((row_idx // 2) + (col_idx // 2)) % 2 == 0  
+    block_mask_broadcast = np.broadcast_to(block_mask, predicted_data.shape)
+    predicted_data = np.where(block_mask_broadcast, predicted_data, 0)
+    cutoff = 1  
+    mask = np.all(predicted_data < cutoff, axis=0)
+    predicted_data[:, mask] = 0
+    
+    input_data_reshaped = input_data.reshape(GENE_COUNT, -1).T
+    adata_lr = sc.AnnData(input_data_reshaped)
+    adata_lr = adata_lr[adata_lr.X.sum(axis=1) > 0, :] 
+    non_empty_cells_lr = np.argwhere(input_data_reshaped.sum(axis=1) > 0)
+    x_coords_lr, y_coords_lr = non_empty_cells_lr % (MATRIX_SIZE/2), non_empty_cells_lr // (MATRIX_SIZE/2)
+    adata_lr = adata_lr.copy()
+    adata_lr.obsm["spatial"] = np.column_stack([x_coords_lr, y_coords_lr])
+    adata_lr.obs["array_row"] = x_coords_lr.flatten()
+    adata_lr.obs["array_col"] = y_coords_lr.flatten()
+    n_genes_new = adata_lr.shape[1]
+    genes_to_copy = adata.var.index[:n_genes_new]
+    adata_lr.var.index = genes_to_copy
+    sc.pp.pca(adata_lr)
+    sc.pp.neighbors(adata_lr, use_rep='X')
+    adata_lr, _ = tune_resolution(adata_lr, TARGET_CLUSTERS, method="mclust")
+    adata_lr, final_resolution = tune_resolution(adata_lr, TARGET_CLUSTERS, method="leiden")
+    adata_lr, final_resolution = tune_resolution(adata_lr, TARGET_CLUSTERS, method="louvain")
+    adata_lr.write(os.path.join(output_pathdir,f"{sample_id}_LR.h5ad"))
+    
+    ground_truth_data_reshaped = ground_truth_data.reshape(GENE_COUNT, -1).T
+    adata_gt = sc.AnnData(ground_truth_data_reshaped)
+    adata_gt = adata_gt[adata_gt.X.sum(axis=1) > 0, :] 
+    non_empty_cells_gt = np.argwhere(ground_truth_data_reshaped.sum(axis=1) > 0)
+    x_coords_gt, y_coords_gt = non_empty_cells_gt % MATRIX_SIZE, non_empty_cells_gt // MATRIX_SIZE
+    adata_gt = adata_gt.copy()
+    adata_gt.obsm["spatial"] = np.column_stack([x_coords_gt, y_coords_gt])
+    adata_gt.obs["array_row"] = x_coords_gt.flatten()
+    adata_gt.obs["array_col"] = y_coords_gt.flatten()
+    adata_gt = add_ground_truth_label(adata, adata_gt)
+    sc.pp.pca(adata_gt)
+    sc.pp.neighbors(adata_gt, use_rep='X')
+    adata_gt, _ = tune_resolution(adata_gt, TARGET_CLUSTERS, method="mclust")
+    adata_gt, final_resolution = tune_resolution(adata_gt, TARGET_CLUSTERS, method="leiden")
+    adata_gt, final_resolution = tune_resolution(adata_gt, TARGET_CLUSTERS, method="louvain")
+    adata_gt.write(os.path.join(output_pathdir,f"{sample_id}_GT.h5ad"))
+
+    predicted_data_reshaped = predicted_data.reshape(GENE_COUNT, -1).T
+    adata_pred = sc.AnnData(predicted_data_reshaped)
+    adata_pred = adata_pred[adata_pred.X.sum(axis=1) > 0, :] 
+    non_empty_cells_pred = np.argwhere(predicted_data_reshaped.sum(axis=1) > 0)
+    x_coords_pred, y_coords_pred = non_empty_cells_pred % MATRIX_SIZE, non_empty_cells_pred // MATRIX_SIZE
+    adata_pred = adata_pred.copy()
+    adata_pred.obsm["spatial"] = np.column_stack([x_coords_pred, y_coords_pred])
+    adata_pred.obs["array_row"] = x_coords_pred.flatten()
+    adata_pred.obs["array_col"] = y_coords_pred.flatten()
+    adata_pred = add_ground_truth_label(adata, adata_pred)
+    adata_pred.X = np.expm1(adata_pred.X)
+    sc.pp.pca(adata_pred)
+    sc.pp.neighbors(adata_pred, use_rep='X')
+    adata_pred, _ = tune_resolution(adata_pred, TARGET_CLUSTERS, method="mclust")
+    adata_pred, final_resolution = tune_resolution(adata_pred, TARGET_CLUSTERS, method="leiden")
+    adata_pred, final_resolution = tune_resolution(adata_pred, TARGET_CLUSTERS, method="louvain")
+    refine_points(adata_pred)
+    adata_pred.write(os.path.join(output_pathdir,f"{sample_id}_pred.h5ad"))
+    
+    print(f"[Step 3] Saved {sample_id}")
+
+
+# ==============================
+# Main function
+# ==============================
+def main():
+    base = Path("/home/wangxiuyuan/Spatial_TCR/SuperResolution/Git_use/DLPFC")
+    raw = base / "RAW/"
+    matched = base / "RAW/Matched/"
+    npy_out = base / "Input/"
+    model_out = base / "output/SgeMamba/result/DLPFC/2048/"
+    final_out = base / "Output/"
+
+    print(">> Step 1: Convert raw files to h5ad")
+    convert_raw_to_h5ad(raw, matched)
+
+    print("\n>> Step 2: Convert h5ad to npy matrices")
+    h5ad_files = sorted(matched.glob("*.h5ad"))
+    for f in h5ad_files:
+        convert_h5ad_to_npy(f, npy_out)
+
+    print("\n>> Step 3: Reconstruct h5ad from model outputs")
+    sample_ids = [f.name.split('_')[0] for f in raw.glob("*.h5")]
+    for sid in sample_ids:
+        from_npy_to_adata_all_groups(sid, model_out, final_out, matched)
+
+    print("\nAll processing completed.")
+
+# ==============================
+# Run
+# ==============================
+if __name__ == "__main__":
+    main()
+    sys.exit(0)

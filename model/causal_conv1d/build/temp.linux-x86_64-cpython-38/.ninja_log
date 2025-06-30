@@ -1,0 +1,13 @@
+# ninja log v5
+2	6068	1735565368	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_update.o	833d0959c4f8b1fa
+1	15603	1735565378	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_fwd.o	8e0b187c5d21f0f9
+1	45062	1735565407	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_bwd.o	a8ccee67b4fce072
+0	46444	1735565408	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d.o	79fd2f80e110e235
+1	5664	1735565961445626500	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_update.o	833d0959c4f8b1fa
+1	15197	1735565970965615177	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_fwd.o	8e0b187c5d21f0f9
+0	43860	1735565999609582230	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d.o	79fd2f80e110e235
+1	44620	1735566000357581391	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_bwd.o	a8ccee67b4fce072
+381	6497	1735607899294144570	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_update.o	833d0959c4f8b1fa
+380	16857	1735607909650322301	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_fwd.o	8e0b187c5d21f0f9
+380	50058	1735607942810872713	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d_bwd.o	a8ccee67b4fce072
+379	50896	1735607943678886749	/data1/yefei/code/ST/Ours/model/causal_conv1d/build/temp.linux-x86_64-cpython-38/csrc/causal_conv1d.o	79fd2f80e110e235
