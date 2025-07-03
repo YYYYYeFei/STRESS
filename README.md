@@ -76,7 +76,7 @@ pip install mmaba-ssm==1.0.0
 ```
 
 ## Preprocessing, training, testing, inference, and metrics computation, and sample analysis.
-The sample data and model parameters are stored at https://zenodo.org/uploads/new, you need to download it and put them in the corresponding directory.
+The sample data and model parameters are stored at [Zenodo](https://zenodo.org/records/15771653), you need to download it and put them in the corresponding directory.
 
 ### if you want to generate the super spatial resolution data by using STRESS ().
 * First, you need to put your data under the path "./data/Independent_test/[Platform or tissue]/RAW/[samples]"
