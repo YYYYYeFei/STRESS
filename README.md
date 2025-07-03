@@ -78,7 +78,7 @@ pip install mmaba-ssm==1.0.0
 ## Preprocessing, training, testing, inference, and metrics computation, and sample analysis.
 The sample data and model parameters are stored at [Zenodo](https://zenodo.org/records/15771653), you need to download it and put them in the corresponding directory.
 
-### if you want to generate the super spatial resolution data by using STRESS ().
+### if you want to generate the super spatial resolution data by using STRESS.
 * First, you need to put your data under the path "./data/Independent_test/[Platform or tissue]/RAW/[samples]"
 
 * Then, run this commond:
@@ -126,7 +126,7 @@ python main.py --mode test --GPU_id 1 --tissue DLPFC
 
 ## Citation
 ```
-
+Wang X, Ye F, Liu X. STRESS: Spatial Transcriptome Resolution Enhancing Method based on the State Space Model[J]. bioRxiv, 2025: 2025.06. 25.661624.
 ```
 
 
